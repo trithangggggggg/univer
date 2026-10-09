@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title></title>
+<style>
+*{box-sizing:border-box}
+html,body{
+  margin:0;width:100%;height:100%;overflow:hidden;
+  background:#03010a;
+}
+canvas{display:block;width:100%;height:100%}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+(()=>{
+"use strict";
+
+const canvas=document.getElementById("c");
+const ctx=canvas.getContext("2d",{alpha:false});
+if(!ctx)return;
+
+let W,H,DPR,t=0,last=0,raf;
+let particles=[],stars=[],meteors=[],dust=[];
+const TAU=Math.PI*2;
+const rand=(a,b)=>a+Math.random()*(b-a);
+
+function heart(u){
+  return {
+    x:16*Math.pow(Math.sin(u),3),
+    y:13*Math.cos(u)-5*Math.cos(2*u)
+      -2*Math.cos(3*u)-Math.cos(4*u)
+  };
+}
+
+function resize(){
+  W=innerWidth;
+  H=innerHeight;
+  DPR=Math.min(devicePixelRatio||1,1.5);
+  canvas.width=Math.round(W*DPR);
+  canvas.height=Math.round(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+  build();
+}
+
+function build(){
+  const area=W*H;
+  const count=Math.max(3000,Math.min(7000,Math.floor(area/130)));
+
+  particles=[];
+  for(let i=0;i<count;i++){
+    const u=Math.random()*TAU;
+    const edge=heart(u);
+
+    // Hạt phủ kín toàn bộ hình trái tim
+    const fill=Math.sqrt(Math.random());
+    const x=edge.x*fill;
+    const y=edge.y*fill;
+
+    particles.push({
+      x,y,
+      z:rand(-1,1),
+      size:rand(.35,1.3),
+      phase:rand(0,TAU),
+      speed:rand(.65,1.5),
+      drift:rand(.5,1.6),
+      hue:rand(300,340),
+      light:Math.random()
+    });
+  }
+
+  stars=Array.from(
+    {length:Math.min(380,Math.floor(area/2000))},
+    ()=>({
+      x:rand(0,W),y:rand(0,H),
+      r:rand(.25,1.1),
+      phase:rand(0,TAU),
+      alpha:rand(.2,.3)
+    })
+  );
+
+  dust=Array.from({length:240},()=>({
+    x:rand(0,W),y:rand(0,H),
+    vx:rand(-.25,.25),
+    vy:rand(.2,.9),
+    size:rand(.3,1.4),
+    phase:rand(0,TAU)
+  }));
+
+  meteors=[];
+}
+
+function background(){
+  const g=ctx.createRadialGradient(
+    W*.5,H*.46,0,W*.5,H*.46,Math.max(W,H)*.76
+  );
+  g.addColorStop(0,"#250820");
+  g.addColorStop(.35,"#13071e");
+  g.addColorStop(.72,"#080413");
+  g.addColorStop(1,"#020108");
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,W,H);
+
+  // Mây tinh vân
+  const n=ctx.createRadialGradient(
+    W*.5,H*.48,0,W*.5,H*.48,Math.min(W,H)*.48
+  );
+  n.addColorStop(0,"rgba(255,0,135,.075)");
+  n.addColorStop(.45,"rgba(123,20,205,.055)");
+  n.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=n;
+  ctx.fillRect(0,0,W,H);
+
+  for(const s of stars){
+    const a=s.alpha*(.55+.45*Math.sin(t*.025+s.phase));
+    ctx.globalAlpha=a;
+    ctx.fillStyle="#e9d5ff";
+    ctx.beginPath();
+    ctx.arc(s.x,s.y,s.r,0,TAU);
+    ctx.fill();
+  }
+  ctx.globalAlpha=1;
+}
+
+function drawDust(dt){
+  ctx.save();
+  ctx.globalCompositeOperation="lighter";
+
+  for(const p of dust){
+    p.x+=(p.vx+Math.sin(t*.01+p.phase)*.1)*dt;
+    p.y+=p.vy*dt;
+
+    if(p.y>H+4){p.y=-4;p.x=rand(0,W)}
+    if(p.x<0)p.x=W;
+    if(p.x>W)p.x=0;
+
+    ctx.globalAlpha=.25+.3*(.5+.5*Math.sin(t*.04+p.phase));
+    ctx.fillStyle="#e85bff";
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,p.size,0,TAU);
+    ctx.fill();
+  }
+
+  ctx.globalAlpha=1;
+  ctx.restore();
+}
+
+function spawnMeteor(){
+  const x=rand(-20,W+20);
+  const y=rand(-H*.45,H*.5);
+  const speed=rand(5,10);
+  const angle=rand(-.22,.22);
+
+  meteors.push({
+    x,y,
+    vx:Math.sin(angle)*speed,
+    vy:Math.cos(angle)*speed,
+    len:rand(45,125),
+    width:rand(.7,1.3),
+    life:1,
+    decay:rand(.006,.013),
+    hue:rand(285,325)
+  });
+}
+
+function drawMeteors(dt){
+  if(Math.random()<.055 && meteors.length<24){
+    spawnMeteor();
+  }
+
+  ctx.save();
+  ctx.globalCompositeOperation="lighter";
+
+  for(let i=meteors.length-1;i>=0;i--){
+    const m=meteors[i];
+    m.x+=m.vx*dt;
+    m.y+=m.vy*dt;
+    m.life-=m.decay*dt;
+
+    const tailX=m.x-m.vx*m.len/Math.max(m.vy,1);
+    const tailY=m.y-m.len;
+
+    const grad=ctx.createLinearGradient(
+      tailX,tailY,m.x,m.y
+    );
+    grad.addColorStop(0,`hsla(${m.hue},100%,70%,0)`);
+    grad.addColorStop(.7,`hsla(${m.hue},100%,78%,${m.life*.7})`);
+    grad.addColorStop(1,`rgba(255,255,255,${m.life})`);
+
+    ctx.strokeStyle=grad;
+    ctx.lineWidth=m.width;
+    ctx.shadowColor="#f65cff";
+    ctx.shadowBlur=14;
+    ctx.beginPath();
+    ctx.moveTo(tailX,tailY);
+    ctx.lineTo(m.x,m.y);
+    ctx.stroke();
+
+    ctx.fillStyle=`rgba(255,245,255,${Math.max(0,m.life)})`;
+    ctx.beginPath();
+    ctx.arc(m.x,m.y,m.width*1.4,0,TAU);
+    ctx.fill();
+
+    if(m.life<=0||m.y>H+160){
+      meteors.splice(i,1);
+    }
+  }
+  ctx.restore();
+}
+
+function drawHeart(dt){
+  const scale=Math.min(W,H)/38;
+  const cx=W*.5;
+  const cy=H*.47;
+
+  // Nhịp đập kép tự nhiên
+  const beatTime=t*.037;
+  const beat=1
+    +.035*Math.sin(beatTime)
+    +.022*Math.pow(Math.max(0,Math.sin(beatTime*2-.7)),5);
+
+  ctx.save();
+  ctx.globalCompositeOperation="lighter";
+
+  // Quầng sáng khổng lồ sau trái tim
+  const glow=ctx.createRadialGradient(
+    cx,cy,0,cx,cy,Math.min(W,H)*.4
+  );
+  glow.addColorStop(0,"rgba(255,0,145,.20)");
+  glow.addColorStop(.35,"rgba(245,0,175,.10)");
+  glow.addColorStop(.68,"rgba(124,15,220,.045)");
+  glow.addColorStop(1,"rgba(0,0,0,0)");
+
+  ctx.fillStyle=glow;
+  ctx.fillRect(0,0,W,H);
+
+  // Lõi sáng trung tâm
+  const core=ctx.createRadialGradient(
+    cx,cy,0,cx,cy,Math.min(W,H)*.22
+  );
+  core.addColorStop(0,"rgba(255,25,170,.075)");
+  core.addColorStop(.55,"rgba(255,0,130,.025)");
+  core.addColorStop(1,"rgba(0,0,0,0)");
+  ctx.fillStyle=core;
+  ctx.fillRect(0,0,W,H);
+
+  // Hàng nghìn hạt tạo thành trái tim.
+  // Chỉ các hạt chuyển động, không xoay toàn bộ trái tim.
+  for(const p of particles){
+    const wave=Math.sin(t*.055*p.speed+p.phase);
+    const breathe=Math.sin(t*.023+p.phase*.4);
+
+    // Bung nhẹ ra ngoài rồi trở về hình trái tim
+    const expansion=1
+      +.024*wave*p.drift
+      +.012*breathe;
+
+    const scatter=scale*.15*wave*p.drift;
+
+    const x=cx+p.x*scale*beat*expansion
+      +Math.cos(p.phase+t*.024)*scatter;
+
+    const y=cy-p.y*scale*beat*expansion
+      +Math.sin(p.phase+t*.024)*scatter;
+
+    const twinkle=.5+.5*Math.sin(
+      t*.09*p.speed+p.phase
+    );
+
+    const r=p.size*(.72+twinkle*.9);
+    const alpha=.5+.5*twinkle;
+
+    ctx.globalAlpha=alpha;
+
+    if(p.light>.92){
+      ctx.fillStyle="#fff4ff";
+    }else if(p.light>.55){
+      ctx.fillStyle=`hsl(${p.hue},100%,${68+twinkle*25}%)`;
+    }else{
+      ctx.fillStyle=`hsl(${p.hue+8},100%,${55+twinkle*28}%)`;
+    }
+
+    ctx.beginPath();
+    ctx.arc(x,y,r,0,TAU);
+    ctx.fill();
+  }
+
+  ctx.restore();
+
+  // Những tia sáng nhỏ lóe lên ngẫu nhiên trên bề mặt
+  ctx.save();
+  ctx.globalCompositeOperation="lighter";
+
+  for(let i=0;i<34;i++){
+    const p=particles[
+      Math.floor((i*173+Math.floor(t*.35))%particles.length)
+    ];
+    const shine=Math.pow(
+      .5+.5*Math.sin(t*.08+p.phase),12
+    );
+
+    if(shine>.45){
+      const x=cx+p.x*scale*beat;
+      const y=cy-p.y*scale*beat;
+      const r=1+shine*2.2;
+
+      ctx.globalAlpha=shine;
+      ctx.strokeStyle="#fff2ff";
+      ctx.lineWidth=.8;
+      ctx.shadowColor="#ff58e8";
+      ctx.shadowBlur=14;
+
+      ctx.beginPath();
+      ctx.moveTo(x-r*2.5,y);
+      ctx.lineTo(x+r*2.5,y);
+      ctx.moveTo(x,y-r*2.5);
+      ctx.lineTo(x,y+r*2.5);
+      ctx.stroke();
+    }
+  }
+
+  ctx.restore();
+}
+
+function frame(now){
+  raf=requestAnimationFrame(frame);
+  const dt=Math.min((now-last)/16.667||1,2);
+  last=now;
+  t+=dt;
+
+  background();
+  drawDust(dt);
+  drawMeteors(dt);
+  drawHeart(dt);
+}
+
+addEventListener("resize",resize);
+
+document.addEventListener("visibilitychange",()=>{
+  cancelAnimationFrame(raf);
+  if(!document.hidden){
+    last=performance.now();
+    raf=requestAnimationFrame(frame);
+  }
+});
+
+resize();
+last=performance.now();
+raf=requestAnimationFrame(frame);
+
+})();
+</script>
+</body>
+</html>
